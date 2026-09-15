@@ -1,0 +1,6 @@
+{
+  "name": "NavoQuest",
+  "description": "JNVST Class 6 Entrance Exam Prep Platform with Practice Quizzes, Student Registration, and Teacher Admin Hub.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
