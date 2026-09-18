@@ -209,7 +209,10 @@ export const INITIAL_PDF_STAGED: PDFUpload = {
   subjectCategory: 'Environmental Studies (EVS)',
   targetTopic: 'The Natural World',
   subtopic: 'Water Cycle',
-  tags: ['15 MCQs', 'Key Auto-Mapped', 'EVS Syllabus'],
+  quizId: 'quiz_water_cycle_2',
+  quizTitle: 'Quiz 2: EVS Natural World Practice',
+  quizNumber: 2,
+  tags: ['Added as Quiz 2', '15 MCQs', 'Key Auto-Mapped', 'EVS Syllabus'],
   status: 'Staged',
 };
 

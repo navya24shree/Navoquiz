@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ScreenType } from '../types';
+import { ScreenType, QuizFilter } from '../types';
+import { getLiveQuestions } from '../lib/pdfExtractor';
 
 interface StudentLoginProps {
-  onNavigate: (screen: ScreenType) => void;
+  onNavigate: (screen: ScreenType, filter?: QuizFilter) => void;
   onLoginSuccess: (studentName: string, email: string) => void;
   showToast: (msg: string, icon?: string) => void;
 }
@@ -46,9 +47,34 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
         setTimeout(() => {
           setIsSubmitting(false);
           onLoginSuccess(registeredStudent.name, registeredStudent.email);
-          showToast(`Welcome back, ${registeredStudent.name}!`, 'check_circle');
-          onNavigate('student-dashboard');
-        }, 500);
+          localStorage.setItem(
+            'navoquest_current_student',
+            JSON.stringify({
+              name: registeredStudent.name,
+              email: registeredStudent.email,
+            })
+          );
+
+          // Check if returning student has an active practice session to resume
+          let lastActive: any = null;
+          try {
+            const activeStr = localStorage.getItem(`navoquest_last_active_${registeredStudent.email}`);
+            if (activeStr) lastActive = JSON.parse(activeStr);
+          } catch (e) {
+            console.error(e);
+          }
+
+          if (lastActive && (lastActive.questionIndex >= 0 || lastActive.questionId)) {
+            showToast(
+              `Welcome back, ${registeredStudent.name}! Resuming where you left off at Question ${lastActive.questionIndex + 1}...`,
+              'play_circle'
+            );
+            onNavigate('practice-quiz', lastActive.quizFilter);
+          } else {
+            showToast(`Welcome back, ${registeredStudent.name}! Resuming where you left off...`, 'play_circle');
+            onNavigate('student-dashboard');
+          }
+        }, 400);
       } else {
         // Save student account credentials if new
         const nameToUse = studentName.trim() || email.split('@')[0];
@@ -60,7 +86,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
           section: 'Sec 6-A',
           testsDone: 0,
           solvedCount: 0,
-          unsolvedCount: 15,
+          unsolvedCount: getLiveQuestions().length,
           accuracy: 0,
           lastActive: 'Just logged in',
           status: 'Active',
@@ -74,6 +100,13 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
 
         savedStudents.unshift(newAccount);
         localStorage.setItem('navoquest_students', JSON.stringify(savedStudents));
+        localStorage.setItem(
+          'navoquest_current_student',
+          JSON.stringify({
+            name: newAccount.name,
+            email: newAccount.email,
+          })
+        );
 
         setTimeout(() => {
           setIsSubmitting(false);

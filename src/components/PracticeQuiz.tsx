@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Question, ScreenType, QuizFilter } from '../types';
 import { getLiveQuestions } from '../lib/pdfExtractor';
 import { recordQuizSubmissionToDB } from '../lib/supabase';
+import { getDerivedQuizId } from '../lib/quizManager';
 
 interface PracticeQuizProps {
   onNavigate: (screen: ScreenType) => void;
@@ -10,56 +11,198 @@ interface PracticeQuizProps {
   quizFilter?: QuizFilter | null;
 }
 
+// Helper to compute initial questions list based on filter
+function getInitialQuestions(filter?: QuizFilter | null): Question[] {
+  const allQuestions = getLiveQuestions();
+  if (!filter || (!filter.quizId && !filter.subtopic && !filter.topic && !filter.subject)) {
+    return allQuestions;
+  }
+
+  // If a specific quizId is provided, isolate questions strictly to that quiz
+  if (filter.quizId) {
+    const matching = allQuestions.filter((q) => (q.quizId || getDerivedQuizId(q)) === filter.quizId);
+    if (matching.length > 0) return matching;
+  }
+
+  // If subtopic is provided, check if questions belong to multiple quizzes
+  if (filter.subtopic) {
+    const subQuestions = allQuestions.filter(
+      (q) => q.subtopic?.trim().toLowerCase() === filter.subtopic!.trim().toLowerCase()
+    );
+    // If the subtopic has multiple quizzes and no quizId was provided, pick the first quiz
+    // to prevent combining separate tests into one giant inflated drill
+    const uniqueQuizzes = Array.from(new Set(subQuestions.map((q) => q.quizId || getDerivedQuizId(q))));
+    if (uniqueQuizzes.length > 1) {
+      return subQuestions.filter((q) => (q.quizId || getDerivedQuizId(q)) === uniqueQuizzes[0]);
+    }
+    return subQuestions;
+  }
+
+  if (filter.topic) {
+    return allQuestions.filter(
+      (q) => q.topic?.trim().toLowerCase() === filter.topic!.trim().toLowerCase()
+    );
+  }
+
+  if (filter.subject) {
+    return allQuestions.filter(
+      (q) => q.section?.trim().toLowerCase() === filter.subject!.trim().toLowerCase()
+    );
+  }
+
+  return allQuestions;
+}
+
+// Helper to load previous submissions
+function getInitialSubmissions(studentEmail: string) {
+  const prevAnswers: Record<number, 'A' | 'B' | 'C' | 'D'> = {};
+  const prevSubmitted: Record<number, boolean> = {};
+  try {
+    const stored = localStorage.getItem('navoquest_submissions');
+    if (stored) {
+      const subs = JSON.parse(stored);
+      if (Array.isArray(subs)) {
+        subs
+          .filter((s: any) => !studentEmail || s.studentEmail === studentEmail)
+          .forEach((s: any) => {
+            if (s.questionId && s.selectedOption) {
+              prevAnswers[s.questionId] = s.selectedOption;
+              prevSubmitted[s.questionId] = true;
+            }
+          });
+      }
+    }
+  } catch (e) {
+    console.error('Error reading submissions:', e);
+  }
+  return { prevAnswers, prevSubmitted };
+}
+
+// Helper to determine accurate resume index
+function calculateResumeIndex(
+  questions: Question[],
+  prevSubmitted: Record<number, boolean>,
+  studentEmail: string
+): { index: number; reason: string } {
+  if (!questions.length) return { index: 0, reason: '' };
+
+  try {
+    const lastActiveKey = `navoquest_last_active_${studentEmail}`;
+    const savedActiveStr = localStorage.getItem(lastActiveKey);
+
+    if (savedActiveStr) {
+      const savedActive = JSON.parse(savedActiveStr);
+      if (savedActive && savedActive.questionId) {
+        const matchIdx = questions.findIndex((q) => q.id === savedActive.questionId);
+        if (matchIdx !== -1) {
+          if (prevSubmitted[savedActive.questionId]) {
+            const nextUnsolved = questions.findIndex((q, i) => i > matchIdx && !prevSubmitted[q.id]);
+            if (nextUnsolved !== -1) {
+              return { index: nextUnsolved, reason: `Resuming at Question ${nextUnsolved + 1}` };
+            }
+            const anyUnsolved = questions.findIndex((q) => !prevSubmitted[q.id]);
+            if (anyUnsolved !== -1) {
+              return { index: anyUnsolved, reason: `Resuming at Question ${anyUnsolved + 1}` };
+            }
+            return { index: matchIdx, reason: `Reviewing Question ${matchIdx + 1}` };
+          }
+          return { index: matchIdx, reason: `Resuming at Question ${matchIdx + 1}` };
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error calculating resume position:', e);
+  }
+
+  // If no saved active session or question not found in current drill,
+  // check if any questions in this drill were already submitted
+  let lastAnsweredIdx = -1;
+  for (let i = questions.length - 1; i >= 0; i--) {
+    if (prevSubmitted[questions[i]?.id]) {
+      lastAnsweredIdx = i;
+      break;
+    }
+  }
+
+  if (lastAnsweredIdx !== -1) {
+    const nextUnsolved = questions.findIndex((q, i) => i > lastAnsweredIdx && !prevSubmitted[q.id]);
+    if (nextUnsolved !== -1) {
+      return { index: nextUnsolved, reason: `Resuming at Question ${nextUnsolved + 1}` };
+    }
+    const anyUnsolved = questions.findIndex((q) => !prevSubmitted[q.id]);
+    if (anyUnsolved !== -1) {
+      return { index: anyUnsolved, reason: `Resuming at Question ${anyUnsolved + 1}` };
+    }
+    return { index: lastAnsweredIdx, reason: `All questions completed` };
+  }
+
+  return { index: 0, reason: '' };
+}
+
 export const PracticeQuiz: React.FC<PracticeQuizProps> = ({
   onNavigate,
   showToast,
   studentEmail = 'aarav.sharma@gmail.com',
   quizFilter,
 }) => {
-  const [questionsList, setQuestionsList] = useState<Question[]>([]);
-
-  useEffect(() => {
-    const allQuestions = getLiveQuestions();
-    if (!quizFilter || (!quizFilter.subtopic && !quizFilter.topic && !quizFilter.subject)) {
-      setQuestionsList(allQuestions);
-      return;
-    }
-
-    const filtered = allQuestions.filter((q) => {
-      // 1. Strict Subtopic Match
-      if (quizFilter.subtopic) {
-        return (
-          q.subtopic?.trim().toLowerCase() === quizFilter.subtopic.trim().toLowerCase()
-        );
-      }
-      // 2. Strict Topic Match
-      if (quizFilter.topic) {
-        return (
-          q.topic?.trim().toLowerCase() === quizFilter.topic.trim().toLowerCase()
-        );
-      }
-      // 3. Strict Subject Match
-      if (quizFilter.subject) {
-        return (
-          q.section?.trim().toLowerCase() === quizFilter.subject.trim().toLowerCase()
-        );
-      }
-      return true;
-    });
-
-    setQuestionsList(filtered);
-    setCurrentQuestionIndex(0);
-  }, [quizFilter]);
-
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
-  const [userAnswers, setUserAnswers] = useState<Record<number, 'A' | 'B' | 'C' | 'D'>>({});
-  const [submittedQuestions, setSubmittedQuestions] = useState<Record<number, boolean>>({});
+  const [questionsList, setQuestionsList] = useState<Question[]>(() => getInitialQuestions(quizFilter));
+  const [userAnswers, setUserAnswers] = useState<Record<number, 'A' | 'B' | 'C' | 'D'>>(() => getInitialSubmissions(studentEmail).prevAnswers);
+  const [submittedQuestions, setSubmittedQuestions] = useState<Record<number, boolean>>(() => getInitialSubmissions(studentEmail).prevSubmitted);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(() => {
+    const qs = getInitialQuestions(quizFilter);
+    const subs = getInitialSubmissions(studentEmail).prevSubmitted;
+    return calculateResumeIndex(qs, subs, studentEmail).index;
+  });
   const [showSaveExitModal, setShowSaveExitModal] = useState<boolean>(false);
   const [showGridAccordion, setShowGridAccordion] = useState<boolean>(false);
+
+  // Sync questions and resume index if quizFilter or studentEmail changes after mount
+  useEffect(() => {
+    const filtered = getInitialQuestions(quizFilter);
+    const { prevAnswers, prevSubmitted } = getInitialSubmissions(studentEmail);
+
+    setQuestionsList(filtered);
+    setUserAnswers(prevAnswers);
+    setSubmittedQuestions(prevSubmitted);
+
+    const { index: resumeIdx, reason: resumeReason } = calculateResumeIndex(filtered, prevSubmitted, studentEmail);
+    setCurrentQuestionIndex(resumeIdx);
+
+    if (resumeIdx > 0) {
+      showToast(resumeReason || `Resumed from Question ${resumeIdx + 1} where you left off.`, 'play_arrow');
+    }
+  }, [quizFilter, studentEmail]);
 
   const currentQ: Question = questionsList[currentQuestionIndex] || questionsList[0];
   const currentAnswer = userAnswers[currentQ?.id] || null;
   const isCurrentSubmitted = Boolean(submittedQuestions[currentQ?.id]);
+
+  // Persist student's last active position whenever current question changes
+  useEffect(() => {
+    if (!currentQ || !studentEmail) return;
+    try {
+      const lastActiveKey = `navoquest_last_active_${studentEmail}`;
+      localStorage.setItem(
+        lastActiveKey,
+        JSON.stringify({
+          studentEmail,
+          questionId: currentQ.id,
+          questionIndex: currentQuestionIndex,
+          subtopic: currentQ.subtopic || currentQ.topic,
+          topic: currentQ.topic,
+          subject: currentQ.section,
+          quizFilter: quizFilter || {
+            subject: currentQ.section,
+            topic: currentQ.topic,
+            subtopic: currentQ.subtopic,
+          },
+          timestamp: Date.now(),
+        })
+      );
+    } catch (e) {
+      console.error('Error saving last active session:', e);
+    }
+  }, [currentQ?.id, currentQuestionIndex, studentEmail, quizFilter]);
 
   // Answer selection
   const handleSelectOption = (optionId: 'A' | 'B' | 'C' | 'D') => {
@@ -210,7 +353,8 @@ export const PracticeQuiz: React.FC<PracticeQuizProps> = ({
                 {currentQ.section}
               </span>
               <span className="text-[11px] text-[#464555] truncate font-semibold">
-                {currentQ.subtopic || currentQ.topic}
+                {(quizFilter?.quizTitle || currentQ.quizTitle) ? `${quizFilter?.quizTitle || currentQ.quizTitle} • ` : ''}
+                {currentQ.subtopic || currentQ.topic} • {totalQuestions} Questions
               </span>
             </div>
           </div>

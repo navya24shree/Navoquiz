@@ -4,6 +4,7 @@ export interface QuestionOption {
   id: 'A' | 'B' | 'C' | 'D';
   text: string;
   subtext?: string;
+  isBold?: boolean;
 }
 
 export interface Question {
@@ -11,12 +12,28 @@ export interface Question {
   section: string;
   topic: string;
   subtopic: string;
+  quizId?: string;
+  quizTitle?: string;
+  sourceFile?: string;
   marks: number;
   prompt: string; // supports HTML or formatted strings
   fractionChips?: string[];
   options: QuestionOption[];
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   explanation?: string;
+  boldAnswerDetected?: boolean;
+}
+
+export interface Quiz {
+  id: string;
+  title: string;
+  quizNumber: number;
+  section: string;
+  topic: string;
+  subtopic: string;
+  sourceFile?: string;
+  createdAt: string;
+  questionCount: number;
 }
 
 export interface Student {
@@ -45,6 +62,9 @@ export interface PDFUpload {
   subjectCategory: string;
   targetTopic: string;
   subtopic: string;
+  quizId?: string;
+  quizTitle?: string;
+  quizNumber?: number;
   tags: string[];
   status: 'Staged' | 'Committed';
   extractedQuestions?: Question[];
@@ -62,6 +82,8 @@ export interface QuizFilter {
   subject?: string;
   topic?: string;
   subtopic?: string;
+  quizId?: string;
+  quizTitle?: string;
 }
 
 export interface QuizSubmission {

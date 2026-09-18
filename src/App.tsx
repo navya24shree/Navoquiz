@@ -10,8 +10,30 @@ import { AdminDashboard } from './components/AdminDashboard';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('student-login');
-  const [studentName, setStudentName] = useState('Aarav Sharma');
-  const [studentEmail, setStudentEmail] = useState('aarav.sharma@gmail.com');
+  const [studentName, setStudentName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('navoquest_current_student');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.name) return parsed.name;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return 'Aarav Sharma';
+  });
+  const [studentEmail, setStudentEmail] = useState(() => {
+    try {
+      const saved = localStorage.getItem('navoquest_current_student');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.email) return parsed.email;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return 'aarav.sharma@gmail.com';
+  });
   const [quizFilter, setQuizFilter] = useState<QuizFilter | null>(null);
 
   const handleNavigate = (screen: ScreenType, filter?: QuizFilter) => {
@@ -36,6 +58,11 @@ export default function App() {
   const handleLoginSuccess = (name: string, email: string) => {
     setStudentName(name);
     setStudentEmail(email);
+    try {
+      localStorage.setItem('navoquest_current_student', JSON.stringify({ name, email }));
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (

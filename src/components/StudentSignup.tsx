@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { ScreenType } from '../types';
+import { ScreenType, QuizFilter } from '../types';
 import { registerStudentToDB } from '../lib/supabase';
 
 interface StudentSignupProps {
-  onNavigate: (screen: ScreenType) => void;
+  onNavigate: (screen: ScreenType, filter?: QuizFilter) => void;
   onSignupSuccess: (studentName: string, email: string) => void;
   showToast: (msg: string, icon?: string) => void;
 }
@@ -40,9 +40,49 @@ export const StudentSignup: React.FC<StudentSignupProps> = ({
     }
 
     setIsSubmitting(true);
-    showToast('Registering student profile...', 'person_add');
+    showToast('Checking student profile...', 'search');
 
     try {
+      // Check if student already signed up before
+      const savedStudents = JSON.parse(localStorage.getItem('navoquest_students') || '[]');
+      const existingStudent = savedStudents.find(
+        (s: { email: string; name?: string }) => s.email.toLowerCase() === email.trim().toLowerCase()
+      );
+
+      if (existingStudent) {
+        setIsSubmitting(false);
+        const resolvedName = existingStudent.name || fullName.trim();
+        onSignupSuccess(resolvedName, existingStudent.email);
+        localStorage.setItem(
+          'navoquest_current_student',
+          JSON.stringify({
+            name: resolvedName,
+            email: existingStudent.email,
+          })
+        );
+
+        // Check if student has an active practice session to resume
+        let lastActive: any = null;
+        try {
+          const activeStr = localStorage.getItem(`navoquest_last_active_${existingStudent.email}`);
+          if (activeStr) lastActive = JSON.parse(activeStr);
+        } catch (e) {
+          console.error(e);
+        }
+
+        if (lastActive && (lastActive.questionIndex >= 0 || lastActive.questionId)) {
+          showToast(
+            `Welcome back, ${resolvedName}! Resuming where you left off at Question ${lastActive.questionIndex + 1}...`,
+            'play_circle'
+          );
+          onNavigate('practice-quiz', lastActive.quizFilter);
+        } else {
+          showToast(`Welcome back, ${resolvedName}! Heading to your student dashboard.`, 'play_circle');
+          onNavigate('student-dashboard');
+        }
+        return;
+      }
+
       await registerStudentToDB({
         name: fullName.trim(),
         email: email.trim(),
@@ -51,12 +91,26 @@ export const StudentSignup: React.FC<StudentSignupProps> = ({
       });
       setIsSubmitting(false);
       onSignupSuccess(fullName.trim(), email.trim());
-      showToast('Account created! 15 Unsolved Questions ready.', 'verified');
+      localStorage.setItem(
+        'navoquest_current_student',
+        JSON.stringify({
+          name: fullName.trim(),
+          email: email.trim(),
+        })
+      );
+      showToast('Account created! Welcome to NavoQuest.', 'verified');
       onNavigate('student-dashboard');
     } catch (err) {
       console.error(err);
       setIsSubmitting(false);
       onSignupSuccess(fullName.trim(), email.trim());
+      localStorage.setItem(
+        'navoquest_current_student',
+        JSON.stringify({
+          name: fullName.trim(),
+          email: email.trim(),
+        })
+      );
       onNavigate('student-dashboard');
     }
   };

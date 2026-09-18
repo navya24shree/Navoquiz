@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getLiveQuestions } from './pdfExtractor';
 
 const metaEnv = (import.meta as unknown as { env: Record<string, string | undefined> }).env || {};
 const supabaseUrl = metaEnv.VITE_SUPABASE_URL || '';
@@ -69,7 +70,7 @@ export async function registerStudentToDB(student: {
     rollNo: Math.floor(Math.random() * 50) + 1,
     testsDone: 0,
     solvedCount: 0,
-    unsolvedCount: 15,
+    unsolvedCount: getLiveQuestions().length,
     accuracy: 0,
     lastActive: 'Just registered',
     status: 'Active' as const,
